@@ -1,0 +1,27 @@
+{
+  "name": "openref",
+  "version": "1.0.0",
+  "description": "Agentic web sources search SDK — turns natural language queries into ranked sources",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch"
+  },
+  "keywords": [
+    "search",
+    "agent",
+    "web",
+    "sources",
+    "nlp"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "cheerio": "^1.2.0",
+    "openai": "^4.78.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "typescript": "^5.7.3"
+  }
+}
