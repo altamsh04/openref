@@ -110,6 +110,7 @@ Citations:
     "3": { "url": "https://scenefordummies.com/...", "title": "AI Startups News...", "domain": "scenefordummies.com" }
   }
 }
+```
 
 ## Technical Details
 
