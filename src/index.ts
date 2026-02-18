@@ -6,4 +6,9 @@ export type {
   SearchMetadata,
   TokenUsage,
   ChatEvent,
+  Chunk,
+  ScoredChunk,
+  CitationMap,
+  QueryIntent,
+  DeepResearchEvent,
 } from "./types";
