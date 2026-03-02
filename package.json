@@ -1,5 +1,5 @@
 {
-  "name": "openref",
+  "name": "@altamsh04/openref",
   "version": "1.0.0",
   "description": "Agentic web sources search SDK — turns natural language queries into ranked sources",
   "main": "dist/index.js",
