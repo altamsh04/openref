@@ -5,10 +5,10 @@ export type {
   SearchResult,
   SearchMetadata,
   TokenUsage,
+  ChatOptions,
+  ChatResponse,
   ChatEvent,
   Chunk,
   ScoredChunk,
   CitationMap,
-  QueryIntent,
-  DeepResearchEvent,
 } from "./types";
