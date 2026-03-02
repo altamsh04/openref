@@ -74,6 +74,7 @@ export default function Home() {
   const [phase, setPhase] = useState("");
   const [theme, setTheme] = useState<"dark" | "light">("dark");
   const [showInfo, setShowInfo] = useState(true);
+  const [openrefModel, setOpenrefModel] = useState<string>("");
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -81,6 +82,10 @@ export default function Home() {
   useEffect(() => {
     const saved = localStorage.getItem("openref-theme") as "dark" | "light" | null;
     if (saved) setTheme(saved);
+  }, []);
+
+  useEffect(() => {
+    setOpenrefModel(process.env.NEXT_PUBLIC_OPENREF_MODEL ?? "");
   }, []);
 
   useEffect(() => {
@@ -471,7 +476,8 @@ export default function Home() {
                       <div className="flex items-start gap-2.5 p-2.5 rounded-lg bg-[var(--bg)]">
                         <Cpu size={14} className="text-[var(--fg-muted)] flex-shrink-0 mt-0.5" />
                         <p className="text-[11.5px] text-[var(--fg-muted)] leading-relaxed">
-                          Running on free OpenRouter model: <strong className="text-[var(--fg)]">stepfun/step-3.5-flash:free</strong>
+                          Running on free OpenRouter model:{" "}
+                          <strong className="text-[var(--fg)]">{openrefModel || "default"}</strong>
                         </p>
                       </div>
                     </div>

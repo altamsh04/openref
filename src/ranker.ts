@@ -56,7 +56,9 @@ export async function llmRerank(
   apiKey: string,
   model: string,
   maxSources: number,
-  timeout: number = 4000
+  timeout: number = 4000,
+  preferLatest: boolean = false,
+  currentDateTime?: string
 ): Promise<Source[]> {
   if (candidates.length <= maxSources) return candidates;
 
@@ -76,15 +78,16 @@ export async function llmRerank(
       messages: [
         {
           role: "system",
-          content: `You are a search result ranker. Given a query and a numbered list of search results (with titles and snippets), return the IDs of the most relevant results in order of relevance. Output ONLY a JSON array of numbers, e.g. [3, 0, 7, 1]. Select the top ${maxSources} most relevant results.`,
+          content: `You are a search result ranker. Given a query and a numbered list of search results (with titles and snippets), return the IDs of the most relevant results in order of relevance. Output ONLY a JSON array of numbers, e.g. [3, 0, 7, 1]. Select the top ${maxSources} most relevant results.${preferLatest ? " Prioritize recent, time-relevant results when credibility is similar." : ""}`,
         },
         {
           role: "user",
-          content: `Query: "${query}"\n\nResults:\n${candidateList}`,
+          content: `${currentDateTime ? `Current DateTime: ${currentDateTime}\n` : ""}Query: "${query}"\n\nResults:\n${candidateList}`,
         },
       ],
       temperature: 0,
       max_tokens: 150,
+      ...(timeout > 0 ? { timeout } : {}),
     });
 
     const content = response.choices[0]?.message?.content?.trim() ?? "[]";

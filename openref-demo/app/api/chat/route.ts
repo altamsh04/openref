@@ -24,6 +24,8 @@ export async function POST(req: NextRequest) {
     chatModel: process.env.OPENREF_MODEL,
     maxSources: 3,
     enableReranking: false,
+    preferLatest: true,
+    timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
     maxContextTokens: 6000,
     chunkTargetTokens: 400,
   });

@@ -14,7 +14,12 @@ import { streamChat, buildCitationMap } from "./chat";
 
 const DEFAULTS = {
   stream: true,
+  preferLatest: true,
+  timeZone: "UTC",
   chatModel: "google/gemma-2-9b-it:free",
+  fallbackChatModels: [] as string[],
+  maxRetries: 2,
+  retryDelayMs: 1200,
   maxOutputTokens: 2048,
   maxContinuationRequests: 2,
   maxSources: 10,
@@ -34,6 +39,25 @@ function assertValidQuery(query: string): void {
   }
 }
 
+function getDateContext(timeZone: string): { year: string; monthYear: string; dateLabel: string } {
+  const now = new Date();
+  const monthYear = new Intl.DateTimeFormat("en-US", { month: "long", year: "numeric", timeZone }).format(now);
+  const dateLabel = new Intl.DateTimeFormat("en-US", {
+    year: "numeric",
+    month: "long",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone,
+    timeZoneName: "short",
+  }).format(now);
+  return { year: String(now.getUTCFullYear()), monthYear, dateLabel };
+}
+
+function buildLatestAwareQuery(query: string, dateCtx: { year: string; monthYear: string; dateLabel: string }): string {
+  return `${query} latest updates ${dateCtx.year} ${dateCtx.monthYear} as of ${dateCtx.dateLabel}`;
+}
+
 export class OpenRef {
   private config: Required<OpenRefConfig>;
 
@@ -45,7 +69,12 @@ export class OpenRef {
     this.config = {
       openRouterApiKey: config.openRouterApiKey,
       stream: config.stream ?? DEFAULTS.stream,
+      preferLatest: config.preferLatest ?? DEFAULTS.preferLatest,
+      timeZone: config.timeZone ?? DEFAULTS.timeZone,
       chatModel: config.chatModel ?? DEFAULTS.chatModel,
+      fallbackChatModels: config.fallbackChatModels ?? DEFAULTS.fallbackChatModels,
+      maxRetries: config.maxRetries ?? DEFAULTS.maxRetries,
+      retryDelayMs: config.retryDelayMs ?? DEFAULTS.retryDelayMs,
       maxOutputTokens: config.maxOutputTokens ?? DEFAULTS.maxOutputTokens,
       maxContinuationRequests: config.maxContinuationRequests ?? DEFAULTS.maxContinuationRequests,
       maxSources: config.maxSources ?? DEFAULTS.maxSources,
@@ -63,7 +92,9 @@ export class OpenRef {
 
     const start = performance.now();
     const timeout = this.config.searchTimeout;
-    const allHits: RawSearchHit[] = await searchWeb(query, timeout);
+    const dateCtx = getDateContext(this.config.timeZone);
+    const queryForSearch = this.config.preferLatest ? buildLatestAwareQuery(query, dateCtx) : query;
+    const allHits: RawSearchHit[] = await searchWeb(queryForSearch, timeout);
 
     const candidates = fastFilter(allHits, 30);
 
@@ -83,7 +114,9 @@ export class OpenRef {
             this.config.openRouterApiKey,
             this.config.chatModel,
             this.config.maxSources,
-            this.config.rerankTimeout
+            this.config.rerankTimeout,
+            this.config.preferLatest,
+            dateCtx.dateLabel
           )
         : candidates.slice(0, this.config.maxSources);
 
@@ -109,6 +142,7 @@ export class OpenRef {
 
   private async *chatStream(query: string): AsyncGenerator<ChatEvent> {
     assertValidQuery(query);
+    const dateCtx = getDateContext(this.config.timeZone);
 
     const result = await this.search(query);
     yield { type: "sources", data: result };
@@ -144,6 +178,11 @@ export class OpenRef {
       {
         maxOutputTokens: this.config.maxOutputTokens,
         maxContinuationRequests: this.config.maxContinuationRequests,
+        preferLatest: this.config.preferLatest,
+        currentDateTime: dateCtx.dateLabel,
+        fallbackModels: this.config.fallbackChatModels,
+        maxRetries: this.config.maxRetries,
+        retryDelayMs: this.config.retryDelayMs,
       }
     )) {
       if (event.type === "text") {
@@ -159,6 +198,7 @@ export class OpenRef {
 
   private async chatNonStream(query: string): Promise<ChatResponse> {
     assertValidQuery(query);
+    const dateCtx = getDateContext(this.config.timeZone);
 
     const result = await this.search(query);
 
@@ -198,6 +238,11 @@ export class OpenRef {
       {
         maxOutputTokens: this.config.maxOutputTokens,
         maxContinuationRequests: this.config.maxContinuationRequests,
+        preferLatest: this.config.preferLatest,
+        currentDateTime: dateCtx.dateLabel,
+        fallbackModels: this.config.fallbackChatModels,
+        maxRetries: this.config.maxRetries,
+        retryDelayMs: this.config.retryDelayMs,
       }
     )) {
       if (event.type === "text") {

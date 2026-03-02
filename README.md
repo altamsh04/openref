@@ -30,7 +30,15 @@ import { OpenRef } from "openref";
 
 const agent = new OpenRef({
   openRouterApiKey: "sk-or-v1......",
+  preferLatest: true,
+  timeZone: "America/New_York",
   chatModel: "stepfun/step-3.5-flash:free",
+  fallbackChatModels: [
+    "google/gemma-2-9b-it:free",
+    "mistralai/mistral-small-3.1-24b-instruct:free"
+  ],
+  maxRetries: 2,
+  retryDelayMs: 1200,
   maxSources: 3,
   searchTimeout: 5000,
   contentTimeout: 6000,
@@ -39,7 +47,7 @@ const agent = new OpenRef({
   chunkTargetTokens: 400,
 });
 
-const query = "recent wars between iran and israel";
+const query = "who acquired manus AI";
 
 async function runChat() {
   const response = await agent.chat(query, { stream: false });
@@ -68,7 +76,12 @@ Required:
 
 Optional:
 - `stream?: boolean` (default `true`)
+- `preferLatest?: boolean` (default `true`)
+- `timeZone?: string` (default `"UTC"`)
 - `chatModel?: string`
+- `fallbackChatModels?: string[]` (default `[]`)
+- `maxRetries?: number` (default `2`)
+- `retryDelayMs?: number` (default `1200`)
 - `maxOutputTokens?: number` (default `2048`)
 - `maxContinuationRequests?: number` (default `2`)
 - `maxSources?: number`

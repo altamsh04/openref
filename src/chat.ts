@@ -56,12 +56,23 @@ export async function* streamChat(
   apiKey: string,
   model: string,
   chunks?: ScoredChunk[],
-  options?: { maxOutputTokens?: number; maxContinuationRequests?: number }
+  options?: {
+    maxOutputTokens?: number;
+    maxContinuationRequests?: number;
+    preferLatest?: boolean;
+    currentDateTime?: string;
+    fallbackModels?: string[];
+    maxRetries?: number;
+    retryDelayMs?: number;
+  }
 ): AsyncGenerator<{ type: "text"; data: string } | { type: "usage"; data: TokenUsage }> {
   const client = getClient(apiKey);
   const maxOutputTokens = options?.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS;
   const maxContinuationRequests =
     options?.maxContinuationRequests ?? DEFAULT_MAX_CONTINUATION_REQUESTS;
+  const fallbackModels = options?.fallbackModels ?? [];
+  const maxRetries = options?.maxRetries ?? 2;
+  const retryDelayMs = options?.retryDelayMs ?? 1200;
 
   const context = chunks && chunks.length > 0
     ? assembleContext(chunks, sources)
@@ -73,11 +84,38 @@ export async function* streamChat(
     return;
   }
 
-  const baseUserPrompt = `## Web Sources\n\n${context}\n\n---\n\n## Question\n${query}`;
+  const recencyLine =
+    options?.preferLatest && options.currentDateTime
+      ? `Current DateTime: ${options.currentDateTime}\nPrioritize the latest available developments and state uncertainties when dates conflict.\n\n`
+      : "";
+  const baseUserPrompt = `${recencyLine}## Web Sources\n\n${context}\n\n---\n\n## Question\n${query}`;
   let accumulatedText = "";
   let totalTokenUsage: TokenUsage = { ...NO_TOKENS };
   let continuationCount = 0;
   let shouldContinue = true;
+  const models = Array.from(new Set([model, ...fallbackModels].filter((m) => m && m.trim().length > 0)));
+
+  function sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  function getErrorStatus(err: unknown): number | undefined {
+    return typeof err === "object" && err !== null && "status" in err
+      ? Number((err as { status?: number }).status)
+      : undefined;
+  }
+
+  function getErrorMessage(err: unknown): string {
+    if (typeof err === "object" && err !== null) {
+      const e = err as { error?: { message?: string; metadata?: { raw?: string } }; message?: string };
+      return e.error?.metadata?.raw ?? e.error?.message ?? e.message ?? "LLM request failed.";
+    }
+    return "LLM request failed.";
+  }
+
+  function isRetryableStatus(status?: number): boolean {
+    return status === 429 || status === 408 || status === 409 || (typeof status === "number" && status >= 500);
+  }
 
   while (shouldContinue) {
     const messages =
@@ -93,14 +131,48 @@ export async function* streamChat(
             { role: "user" as const, content: CONTINUE_PROMPT },
           ];
 
-    const stream = await client.chat.completions.create({
-      model,
-      stream: true,
-      stream_options: { include_usage: true },
-      messages,
-      temperature: 0.5,
-      max_tokens: maxOutputTokens,
-    });
+    let stream: Awaited<ReturnType<typeof client.chat.completions.create>> | null = null;
+    let lastError: unknown;
+
+    modelLoop:
+    for (const candidateModel of models) {
+      for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        try {
+          stream = await client.chat.completions.create({
+            model: candidateModel,
+            stream: true,
+            stream_options: { include_usage: true },
+            messages,
+            temperature: 0.5,
+            max_tokens: maxOutputTokens,
+          });
+          break modelLoop;
+        } catch (err) {
+          lastError = err;
+          const status = getErrorStatus(err);
+          const canRetry = isRetryableStatus(status) && attempt < maxRetries;
+          if (canRetry) {
+            await sleep(retryDelayMs * (attempt + 1));
+            continue;
+          }
+          break;
+        }
+      }
+    }
+
+    if (!stream) {
+      const status = getErrorStatus(lastError);
+      const rawMessage = getErrorMessage(lastError);
+      const helpText =
+        status === 429
+          ? "Rate-limited by model provider. Retry shortly, use paid/BYOK key, or configure fallbackChatModels."
+          : status === 404
+            ? "Model/policy routing failed. Check OpenRouter privacy settings and selected model availability."
+            : "Model request failed after retries and fallbacks.";
+      yield { type: "text", data: `${helpText}\nDetails: ${rawMessage}` };
+      yield { type: "usage", data: totalTokenUsage };
+      return;
+    }
 
     let requestTokenUsage: TokenUsage = { ...NO_TOKENS };
     let hitLengthLimit = false;

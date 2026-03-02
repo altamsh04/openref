@@ -1,7 +1,12 @@
 export interface OpenRefConfig {
   openRouterApiKey: string;
   stream?: boolean;
+  preferLatest?: boolean;
+  timeZone?: string;
   chatModel?: string;
+  fallbackChatModels?: string[];
+  maxRetries?: number;
+  retryDelayMs?: number;
   maxOutputTokens?: number;
   maxContinuationRequests?: number;
   maxSources?: number;
