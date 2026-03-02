@@ -20,7 +20,7 @@ Query -> Web Search -> Content Extraction/Chunking -> Streaming Chat Response
 ## Install
 
 ```bash
-npm install openref
+npm install @altamsh04/openref
 ```
 
 ## Quick Start
