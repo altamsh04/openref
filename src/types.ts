@@ -1,12 +1,12 @@
 export interface OpenRefConfig {
   openRouterApiKey: string;
-  model?: string;
+  stream?: boolean;
   chatModel?: string;
+  maxOutputTokens?: number;
+  maxContinuationRequests?: number;
   maxSources?: number;
   searchTimeout?: number;
-  fetchContent?: boolean;
   contentTimeout?: number;
-  chat?: boolean;
   enableReranking?: boolean;
   rerankTimeout?: number;
   maxContextTokens?: number;
@@ -26,7 +26,6 @@ export interface SearchResult {
   query: string;
   sources: Source[];
   metadata: SearchMetadata;
-  intent?: QueryIntent;
 }
 
 export interface TokenUsage {
@@ -64,13 +63,18 @@ export interface CitationMap {
   [N: number]: { url: string; title: string; domain: string };
 }
 
-export type QueryIntent = "factual" | "research" | "current" | "how-to" | "general";
+export interface ChatOptions {
+  stream?: boolean;
+}
 
-export type DeepResearchEvent =
-  | { type: "iteration"; data: { pass: number; totalPasses: number; status: string } }
-  | { type: "sources"; data: SearchResult }
-  | { type: "text"; data: string }
-  | { type: "done"; data: { chatTokenUsage: TokenUsage; citationMap: CitationMap; iterations: number } };
+export interface ChatResponse {
+  query: string;
+  sources: Source[];
+  text: string;
+  citationMap: CitationMap;
+  metadata: SearchMetadata;
+  chatTokenUsage: TokenUsage;
+}
 
 export type ChatEvent =
   | { type: "sources"; data: SearchResult }
