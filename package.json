@@ -4,9 +4,14 @@
   "description": "Agentic web sources search SDK — turns natural language queries into ranked sources",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "scripts": {
     "build": "tsc",
-    "dev": "tsc --watch"
+    "dev": "tsc --watch",
+    "prepublishOnly": "rm -rf dist && npm run build"
   },
   "keywords": [
     "search",
