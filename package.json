@@ -1,6 +1,6 @@
 {
   "name": "openref",
-  "version": "1.0.1",
+  "version": "1.0.0",
   "description": "Agentic web sources search SDK — turns natural language queries into ranked sources",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
