@@ -1,6 +1,6 @@
 # OpenRef
 
-OpenRef is a production-oriented TypeScript SDK for web-grounded answers with citations.
+OpenRef is a TypeScript SDK for web-grounded answers with citations.
 
 It keeps the runtime model simple:
 
