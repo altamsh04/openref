@@ -115,3 +115,18 @@ When `stream` is `false`, returns `Promise<ChatResponse>`:
 - `query` must be a non-empty string.
 - If no sources are found, `chat` returns a graceful text response and empty citation map.
 - OpenRef uses OpenRouter-compatible chat models for reranking and response generation.
+
+## Contribution Guide
+
+Contributions are welcome.
+
+1. Fork this repository to your GitHub account.
+2. Create a feature branch from your fork.
+3. Make your changes with clear, focused commits.
+4. Push your branch to your fork.
+5. Raise a Pull Request (PR) to this repository with:
+   - a clear summary of what changed
+   - the reason for the change
+   - any relevant test or usage notes
+
+Please keep PRs scoped and easy to review.
