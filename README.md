@@ -2,6 +2,8 @@
 
 OpenRef is a production-oriented TypeScript SDK for web-grounded answers with optional inline citations.
 
+It keeps the runtime model simple:
+
 ```text
 Query -> Web Search -> Content Extraction/Chunking -> Streaming Chat Response
 ```
