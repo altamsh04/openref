@@ -26,7 +26,7 @@ npm install @altamsh04/openref
 ## Quick Start
 
 ```ts
-import { OpenRef } from "openref";
+import { OpenRef } from "@altamsh04/openref";
 
 const agent = new OpenRef({
   openRouterApiKey: "sk-or-v1......",
