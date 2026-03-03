@@ -71,3 +71,6 @@ example/node_modules
 example/.env
 example/result.json
 dist
+dist-example
+!scripts/smoke.js
+!scripts/test-pack.sh

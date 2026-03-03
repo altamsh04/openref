@@ -1,8 +1,6 @@
 # OpenRef
 
-OpenRef is a production-oriented TypeScript SDK for web-grounded answers with citations.
-
-It keeps the runtime model simple:
+OpenRef is a production-oriented TypeScript SDK for web-grounded answers with optional inline citations.
 
 ```text
 Query -> Web Search -> Content Extraction/Chunking -> Streaming Chat Response
@@ -14,7 +12,8 @@ Query -> Web Search -> Content Extraction/Chunking -> Streaming Chat Response
 - Source deduplication and domain diversity filtering
 - Optional LLM reranking of search candidates
 - Query-aware page extraction and chunk scoring
-- Streaming chat response with inline source citations (`[N]`)
+- Streaming chat response
+- Configurable citation behavior (`citationStrictness`)
 - Typed SDK surface (`search`, `chat`, event streams)
 
 ## Install
@@ -29,104 +28,175 @@ npm install @altamsh04/openref
 import { OpenRef } from "@altamsh04/openref";
 
 const agent = new OpenRef({
-  openRouterApiKey: "sk-or-v1......",
-  preferLatest: true,
-  timeZone: "America/New_York",
-  chatModel: "stepfun/step-3.5-flash:free",
-  fallbackChatModels: [
-    "google/gemma-2-9b-it:free",
-    "mistralai/mistral-small-3.1-24b-instruct:free"
-  ],
-  maxRetries: 2,
-  retryDelayMs: 1200,
-  maxSources: 3,
-  searchTimeout: 5000,
-  contentTimeout: 6000,
-  enableReranking: true,
-  maxContextTokens: 6000,
-  chunkTargetTokens: 400,
+  llm: {
+    apiKey: "sk-or-v1......",
+    chatModel: "stepfun/step-3.5-flash:free",
+    fallbackChatModels: [
+      "nvidia/nemotron-3-nano-30b-a3b:free",
+      "mistralai/mistral-small-3.1-24b-instruct:free"
+    ],
+    systemPrompt: "Answer in short bullet points.",
+    citationStrictness: true,
+    maxRetries: 2,
+    retryDelayMs: 1200,
+    maxOutputTokens: 2048,
+    maxContinuationRequests: 2
+  },
+  search: {
+    preferLatest: true,
+    timeZone: "America/New_York",
+    maxSources: 5,
+    searchTimeout: 5000,
+    enableReranking: true,
+    rerankTimeout: 4000
+  },
+  retrieval: {
+    contentTimeout: 6000,
+    maxContextTokens: 6000,
+    chunkTargetTokens: 400
+  },
+  response: {
+    stream: true
+  }
 });
 
-const query = "who acquired manus AI";
+const query = "Today's top news in AI";
 
-async function runChat() {
-  const response = await agent.chat(query, { stream: false });
+async function run() {
+  // Per-request overrides
+  const response = await agent.chat(query, {
+    stream: false,
+    systemPrompt: "Keep it under 120 words and mention uncertainty clearly.",
+    citationStrictness: false
+  });
+
   console.log(JSON.stringify(response, null, 2));
 }
 
-runChat();
+run();
 ```
 
-## Technical Details
+## Local Example
 
-- **Search Engines** — Brave Search (primary), DuckDuckGo (fallback), with parallel failover
-- **Streaming** — All output modes use `AsyncGenerator` for non-blocking event streaming
-- **Content Extraction** — Query-aware HTML filtering keeps only relevant sections before chunking
-- **Chunk Scoring** — TF-based relevance scoring against the original query
-- **Domain Diversity** — Prevents source stacking from the same domain
-- **LLM Provider** — Routes through OpenRouter, compatible with any supported model
-- **Token Management** — Per-request tracking with configurable context and chunk budgets
+Run the local SDK example:
+
+```bash
+OPENROUTER_API_KEY=sk-or-v1-xxxx npm run example:run -- "Today's top news in AI"
+```
+
+Run dedicated non-stream and stream examples:
+
+```bash
+OPENROUTER_API_KEY=sk-or-v1-xxxx npm run example:non-stream -- "What is OpenRouter?"
+OPENROUTER_API_KEY=sk-or-v1-xxxx npm run example:stream -- "What is OpenRouter?"
+```
+
+Files:
+- `example/index.ts` example app using local source (`../src`)
+- `example/non-stream.ts` non-stream response example
+- `example/stream.ts` stream response example
+- `tsconfig.example.json` example build config
 
 ## API
 
 ### `new OpenRef(config)`
 
-Required:
-- `openRouterApiKey: string`
+#### `config.llm`
+- `apiKey?: string` OpenRouter API key. Preferred key location.
+- `chatModel?: string` Primary chat model.
+- `fallbackChatModels?: string[]` Models used if primary model fails.
+- `systemPrompt?: string` Base system instruction for response style/behavior.
+- `citationStrictness?: boolean` Citation policy in response text.
+- `maxRetries?: number` Retry attempts per model request.
+- `retryDelayMs?: number` Backoff delay between retries.
+- `maxOutputTokens?: number` Max tokens per generation request.
+- `maxContinuationRequests?: number` Extra continuation requests when output is truncated.
 
-Optional:
-- `stream?: boolean` (default `true`)
-- `preferLatest?: boolean` (default `true`)
-- `timeZone?: string` (default `"UTC"`)
-- `chatModel?: string`
-- `fallbackChatModels?: string[]` (default `[]`)
-- `maxRetries?: number` (default `2`)
-- `retryDelayMs?: number` (default `1200`)
-- `maxOutputTokens?: number` (default `2048`)
-- `maxContinuationRequests?: number` (default `2`)
-- `maxSources?: number`
-- `searchTimeout?: number`
-- `contentTimeout?: number`
-- `enableReranking?: boolean`
-- `rerankTimeout?: number`
-- `maxContextTokens?: number`
-- `chunkTargetTokens?: number`
+`citationStrictness` behavior:
+- `true` (default): model is instructed to include inline `[N]` citations for factual claims.
+- `false`: model is instructed to avoid `[N]` citations unless user explicitly asks.
+
+#### `config.search`
+- `preferLatest?: boolean` Adds recency bias to search and prompting.
+- `timeZone?: string` Used for date context formatting.
+- `maxSources?: number` Final number of sources to keep.
+- `searchTimeout?: number` Search request timeout in ms.
+- `enableReranking?: boolean` Enable LLM reranking for candidates.
+- `rerankTimeout?: number` Reranking timeout in ms.
+
+#### `config.retrieval`
+- `contentTimeout?: number` Page fetch/extraction timeout in ms.
+- `maxContextTokens?: number` Token budget for assembled context.
+- `chunkTargetTokens?: number` Approximate target size of chunks.
+
+#### `config.response`
+- `stream?: boolean` Default chat mode (`true` for event stream, `false` for aggregated response).
 
 ### `search(query: string): Promise<SearchResult>`
 
-Returns ranked sources and search metadata.
+Runs retrieval and ranking only.
 
-### `chat(query: string, options?: { stream?: boolean })`
+### `chat(query: string, options?)`
 
-When `stream` is `true` (default), returns `AsyncGenerator<ChatEvent>` with sequence:
+Per-request options:
+- `stream?: boolean`
+- `systemPrompt?: string` Overrides constructor `llm.systemPrompt`.
+- `citationStrictness?: boolean` Overrides constructor `llm.citationStrictness`.
+
+When `stream: true`, returns `AsyncGenerator<ChatEvent>` with:
 - `sources`
-- `text` (multiple streamed chunks)
+- `text` (multiple chunks)
 - `citations`
 - `done`
 
-When `stream` is `false`, returns `Promise<ChatResponse>`:
-- full `text` (non-stream)
+When `stream: false`, returns `Promise<ChatResponse>` with:
+- `text`
 - `sources`
 - `citationMap`
 - `chatTokenUsage`
+- `metadata`
+
+## Legacy Config Support
+
+Top-level fields like `openRouterApiKey`, `chatModel`, `maxSources`, etc. are still accepted for backward compatibility.
+
+Preferred format is grouped config (`llm`, `search`, `retrieval`, `response`).
+
+## Test Before Publish
+
+Run full pre-publish checks:
+
+```bash
+npm run check
+```
+
+This runs:
+- `npm run typecheck` (`tsc --noEmit`)
+- `npm run test:smoke` (build + SDK smoke checks)
+- `npm run test:pack` (build + `npm pack` install/import verification in a temp project)
+
+`test:pack` tries a real temp-project install first. If npm registry access is unavailable, it automatically runs an offline tarball import fallback.
+
+### Smoke Test Modes
+
+- Without `OPENROUTER_API_KEY`:
+  - validates constructor/config compatibility (grouped + legacy)
+  - validates API surface (`search`, `chat`)
+  - skips live network requests
+
+- With `OPENROUTER_API_KEY`:
+  - runs live `search`
+  - runs `chat` non-stream
+  - runs `chat` stream and confirms `done` event
+
+Example:
+
+```bash
+OPENROUTER_API_KEY=sk-or-v1-xxxx npm run test:smoke
+```
 
 ## Notes
 
 - `query` must be a non-empty string.
-- If no sources are found, `chat` returns a graceful text response and empty citation map.
+- If no sources are found, `chat` returns a graceful text response with empty citation map.
 - OpenRef uses OpenRouter-compatible chat models for reranking and response generation.
-
-## Contribution Guide
-
-Contributions are welcome.
-
-1. Fork this repository to your GitHub account.
-2. Create a feature branch from your fork.
-3. Make your changes with clear, focused commits.
-4. Push your branch to your fork.
-5. Raise a Pull Request (PR) to this repository with:
-   - a clear summary of what changed
-   - the reason for the change
-   - any relevant test or usage notes
-
-Please keep PRs scoped and easy to review.

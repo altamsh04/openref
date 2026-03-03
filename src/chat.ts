@@ -1,9 +1,12 @@
 import type { Source, TokenUsage, ScoredChunk, CitationMap } from "./types";
 import { getClient } from "./llmclient";
 
-const SYSTEM_PROMPT = `You are a helpful research assistant. Answer the user's question based on the provided web sources. Be concise and accurate.
-
-IMPORTANT: Cite your sources using [N] markers inline, where N corresponds to the source numbers listed. Every factual claim should have a citation. If the sources don't contain enough information, say so.`;
+const DEFAULT_SYSTEM_PROMPT = `You are a helpful research assistant. Answer the user's question based on the provided web sources. Be concise and accurate.
+If the sources don't contain enough information, say so.`;
+const STRICT_CITATION_INSTRUCTION =
+  "IMPORTANT: Cite your sources using [N] markers inline, where N corresponds to the source numbers listed. Every factual claim should have a citation.";
+const RELAXED_CITATION_INSTRUCTION =
+  "Citations are optional. Do not include [N] citation markers unless the user explicitly asks for citations.";
 const CONTINUE_PROMPT =
   "Continue exactly from where you stopped. Do not repeat earlier text. Keep citations consistent.";
 const NO_TOKENS: TokenUsage = { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
@@ -64,6 +67,8 @@ export async function* streamChat(
     fallbackModels?: string[];
     maxRetries?: number;
     retryDelayMs?: number;
+    systemPrompt?: string;
+    citationStrictness?: boolean;
   }
 ): AsyncGenerator<{ type: "text"; data: string } | { type: "usage"; data: TokenUsage }> {
   const client = getClient(apiKey);
@@ -73,6 +78,11 @@ export async function* streamChat(
   const fallbackModels = options?.fallbackModels ?? [];
   const maxRetries = options?.maxRetries ?? 2;
   const retryDelayMs = options?.retryDelayMs ?? 1200;
+  const systemPrompt = options?.systemPrompt?.trim() || DEFAULT_SYSTEM_PROMPT;
+  const citationStrictness = options?.citationStrictness ?? true;
+  const effectiveSystemPrompt = `${systemPrompt}\n\n${
+    citationStrictness ? STRICT_CITATION_INSTRUCTION : RELAXED_CITATION_INSTRUCTION
+  }`;
 
   const context = chunks && chunks.length > 0
     ? assembleContext(chunks, sources)
@@ -121,11 +131,11 @@ export async function* streamChat(
     const messages =
       accumulatedText.length === 0
         ? [
-            { role: "system" as const, content: SYSTEM_PROMPT },
+            { role: "system" as const, content: effectiveSystemPrompt },
             { role: "user" as const, content: baseUserPrompt },
           ]
         : [
-            { role: "system" as const, content: SYSTEM_PROMPT },
+            { role: "system" as const, content: effectiveSystemPrompt },
             { role: "user" as const, content: baseUserPrompt },
             { role: "assistant" as const, content: accumulatedText },
             { role: "user" as const, content: CONTINUE_PROMPT },
@@ -216,16 +226,21 @@ export async function chatComplete(
   context: string,
   apiKey: string,
   model: string,
-  systemPrompt?: string
+  systemPrompt?: string,
+  citationStrictness: boolean = true
 ): Promise<{ text: string; tokenUsage: TokenUsage }> {
   const client = getClient(apiKey);
   const noTokens: TokenUsage = { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
+  const basePrompt = systemPrompt ?? DEFAULT_SYSTEM_PROMPT;
+  const effectiveSystemPrompt = `${basePrompt}\n\n${
+    citationStrictness ? STRICT_CITATION_INSTRUCTION : RELAXED_CITATION_INSTRUCTION
+  }`;
 
   try {
     const response = await client.chat.completions.create({
       model,
       messages: [
-        { role: "system", content: systemPrompt ?? SYSTEM_PROMPT },
+        { role: "system", content: effectiveSystemPrompt },
         { role: "user", content: `## Web Sources\n\n${context}\n\n---\n\n## Question\n${query}` },
       ],
       temperature: 0.5,

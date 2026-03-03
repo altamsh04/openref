@@ -14,9 +14,11 @@ import { streamChat, buildCitationMap } from "./chat";
 
 const DEFAULTS = {
   stream: true,
+  systemPrompt: "",
+  citationStrictness: true,
   preferLatest: true,
   timeZone: "UTC",
-  chatModel: "google/gemma-2-9b-it:free",
+  chatModel: "nvidia/nemotron-3-nano-30b-a3b:free",
   fallbackChatModels: [] as string[],
   maxRetries: 2,
   retryDelayMs: 1200,
@@ -32,6 +34,35 @@ const DEFAULTS = {
 } as const;
 
 const NO_TOKENS: TokenUsage = { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
+
+interface ResolvedOpenRefConfig {
+  openRouterApiKey: string;
+  stream: boolean;
+  systemPrompt: string;
+  citationStrictness: boolean;
+  preferLatest: boolean;
+  timeZone: string;
+  chatModel: string;
+  fallbackChatModels: string[];
+  maxRetries: number;
+  retryDelayMs: number;
+  maxOutputTokens: number;
+  maxContinuationRequests: number;
+  maxSources: number;
+  searchTimeout: number;
+  contentTimeout: number;
+  enableReranking: boolean;
+  rerankTimeout: number;
+  maxContextTokens: number;
+  chunkTargetTokens: number;
+}
+
+function pickDefined<T>(...values: Array<T | undefined>): T | undefined {
+  for (const value of values) {
+    if (value !== undefined) return value;
+  }
+  return undefined;
+}
 
 function assertValidQuery(query: string): void {
   if (typeof query !== "string" || query.trim().length === 0) {
@@ -58,32 +89,79 @@ function buildLatestAwareQuery(query: string, dateCtx: { year: string; monthYear
   return `${query} latest updates ${dateCtx.year} ${dateCtx.monthYear} as of ${dateCtx.dateLabel}`;
 }
 
+const STREAM_SANITIZE_TAIL = 48;
+
+function removeCitationMarkers(text: string): string {
+  return text
+    // Common citation marker variants from different model styles.
+    .replace(/\s*\[\d+\]/g, "")
+    .replace(/\s*\[\d+†[^\]]*]/g, "")
+    .replace(/\s*【\d+】/g, "")
+    .replace(/\s*【\d+†[^】]*】/g, "")
+    // Broad fallback: bracketed numeric citations with optional trailing metadata.
+    .replace(/\s*[\[【]\s*\d+(?:[^\]】]{0,24})?[\]】]/g, "");
+}
+
+function stripInlineCitations(text: string): string {
+  return removeCitationMarkers(text)
+    .replace(/\s+([.,;:!?])/g, "$1")
+    .replace(/[ \t]{2,}/g, " ")
+    .trim();
+}
+
 export class OpenRef {
-  private config: Required<OpenRefConfig>;
+  private config: ResolvedOpenRefConfig;
 
   constructor(config: OpenRefConfig) {
-    if (!config?.openRouterApiKey?.trim()) {
-      throw new Error("openRouterApiKey is required.");
+    const openRouterApiKey = pickDefined(config?.llm?.apiKey, config?.openRouterApiKey)?.trim();
+    if (!openRouterApiKey) {
+      throw new Error("OpenRouter API key is required. Provide llm.apiKey (preferred) or openRouterApiKey (legacy).");
     }
 
     this.config = {
-      openRouterApiKey: config.openRouterApiKey,
-      stream: config.stream ?? DEFAULTS.stream,
-      preferLatest: config.preferLatest ?? DEFAULTS.preferLatest,
-      timeZone: config.timeZone ?? DEFAULTS.timeZone,
-      chatModel: config.chatModel ?? DEFAULTS.chatModel,
-      fallbackChatModels: config.fallbackChatModels ?? DEFAULTS.fallbackChatModels,
-      maxRetries: config.maxRetries ?? DEFAULTS.maxRetries,
-      retryDelayMs: config.retryDelayMs ?? DEFAULTS.retryDelayMs,
-      maxOutputTokens: config.maxOutputTokens ?? DEFAULTS.maxOutputTokens,
-      maxContinuationRequests: config.maxContinuationRequests ?? DEFAULTS.maxContinuationRequests,
-      maxSources: config.maxSources ?? DEFAULTS.maxSources,
-      searchTimeout: config.searchTimeout ?? DEFAULTS.searchTimeout,
-      contentTimeout: config.contentTimeout ?? DEFAULTS.contentTimeout,
-      enableReranking: config.enableReranking ?? DEFAULTS.enableReranking,
-      rerankTimeout: config.rerankTimeout ?? DEFAULTS.rerankTimeout,
-      maxContextTokens: config.maxContextTokens ?? DEFAULTS.maxContextTokens,
-      chunkTargetTokens: config.chunkTargetTokens ?? DEFAULTS.chunkTargetTokens,
+      openRouterApiKey,
+      stream: pickDefined(config.response?.stream, config.stream, DEFAULTS.stream)!,
+      systemPrompt: pickDefined(config.llm?.systemPrompt, config.systemPrompt, DEFAULTS.systemPrompt)!,
+      citationStrictness: pickDefined(
+        config.llm?.citationStrictness,
+        config.citationStrictness,
+        DEFAULTS.citationStrictness
+      )!,
+      preferLatest: pickDefined(config.search?.preferLatest, config.preferLatest, DEFAULTS.preferLatest)!,
+      timeZone: pickDefined(config.search?.timeZone, config.timeZone, DEFAULTS.timeZone)!,
+      chatModel: pickDefined(config.llm?.chatModel, config.chatModel, DEFAULTS.chatModel)!,
+      fallbackChatModels: pickDefined(
+        config.llm?.fallbackChatModels,
+        config.fallbackChatModels,
+        DEFAULTS.fallbackChatModels
+      )!,
+      maxRetries: pickDefined(config.llm?.maxRetries, config.maxRetries, DEFAULTS.maxRetries)!,
+      retryDelayMs: pickDefined(config.llm?.retryDelayMs, config.retryDelayMs, DEFAULTS.retryDelayMs)!,
+      maxOutputTokens: pickDefined(config.llm?.maxOutputTokens, config.maxOutputTokens, DEFAULTS.maxOutputTokens)!,
+      maxContinuationRequests: pickDefined(
+        config.llm?.maxContinuationRequests,
+        config.maxContinuationRequests,
+        DEFAULTS.maxContinuationRequests
+      )!,
+      maxSources: pickDefined(config.search?.maxSources, config.maxSources, DEFAULTS.maxSources)!,
+      searchTimeout: pickDefined(config.search?.searchTimeout, config.searchTimeout, DEFAULTS.searchTimeout)!,
+      contentTimeout: pickDefined(config.retrieval?.contentTimeout, config.contentTimeout, DEFAULTS.contentTimeout)!,
+      enableReranking: pickDefined(
+        config.search?.enableReranking,
+        config.enableReranking,
+        DEFAULTS.enableReranking
+      )!,
+      rerankTimeout: pickDefined(config.search?.rerankTimeout, config.rerankTimeout, DEFAULTS.rerankTimeout)!,
+      maxContextTokens: pickDefined(
+        config.retrieval?.maxContextTokens,
+        config.maxContextTokens,
+        DEFAULTS.maxContextTokens
+      )!,
+      chunkTargetTokens: pickDefined(
+        config.retrieval?.chunkTargetTokens,
+        config.chunkTargetTokens,
+        DEFAULTS.chunkTargetTokens
+      )!,
     };
   }
 
@@ -136,11 +214,11 @@ export class OpenRef {
   chat(query: string, options: ChatOptions & { stream: false }): Promise<ChatResponse>;
   chat(query: string, options: ChatOptions = {}): AsyncGenerator<ChatEvent> | Promise<ChatResponse> {
     const stream = options.stream ?? this.config.stream;
-    if (!stream) return this.chatNonStream(query);
-    return this.chatStream(query);
+    if (!stream) return this.chatNonStream(query, options);
+    return this.chatStream(query, options);
   }
 
-  private async *chatStream(query: string): AsyncGenerator<ChatEvent> {
+  private async *chatStream(query: string, options: ChatOptions = {}): AsyncGenerator<ChatEvent> {
     assertValidQuery(query);
     const dateCtx = getDateContext(this.config.timeZone);
 
@@ -166,6 +244,8 @@ export class OpenRef {
 
     result.sources = enrichedSources;
     const citationMap = buildCitationMap(result.sources);
+    const citationStrictness = options?.citationStrictness ?? this.config.citationStrictness;
+    let citationBuffer = "";
 
     let chatTokenUsage: TokenUsage = { ...NO_TOKENS };
 
@@ -180,15 +260,39 @@ export class OpenRef {
         maxContinuationRequests: this.config.maxContinuationRequests,
         preferLatest: this.config.preferLatest,
         currentDateTime: dateCtx.dateLabel,
+        systemPrompt: options?.systemPrompt ?? this.config.systemPrompt,
+        citationStrictness,
         fallbackModels: this.config.fallbackChatModels,
         maxRetries: this.config.maxRetries,
         retryDelayMs: this.config.retryDelayMs,
       }
     )) {
       if (event.type === "text") {
-        yield { type: "text", data: event.data };
+        if (citationStrictness) {
+          if (event.data.length > 0) {
+            yield { type: "text", data: event.data };
+          }
+        } else {
+          citationBuffer += event.data;
+          if (citationBuffer.length > STREAM_SANITIZE_TAIL) {
+            const flushLength = citationBuffer.length - STREAM_SANITIZE_TAIL;
+            const flushChunk = citationBuffer.slice(0, flushLength);
+            citationBuffer = citationBuffer.slice(flushLength);
+            const sanitized = removeCitationMarkers(flushChunk);
+            if (sanitized.length > 0) {
+              yield { type: "text", data: sanitized };
+            }
+          }
+        }
       } else if (event.type === "usage") {
         chatTokenUsage = event.data;
+      }
+    }
+
+    if (!citationStrictness && citationBuffer.length > 0) {
+      const sanitized = removeCitationMarkers(citationBuffer);
+      if (sanitized.length > 0) {
+        yield { type: "text", data: sanitized };
       }
     }
 
@@ -196,7 +300,7 @@ export class OpenRef {
     yield { type: "done", data: { chatTokenUsage, citationMap } };
   }
 
-  private async chatNonStream(query: string): Promise<ChatResponse> {
+  private async chatNonStream(query: string, options: ChatOptions = {}): Promise<ChatResponse> {
     assertValidQuery(query);
     const dateCtx = getDateContext(this.config.timeZone);
 
@@ -225,6 +329,7 @@ export class OpenRef {
 
     result.sources = enrichedSources;
     const citationMap = buildCitationMap(result.sources);
+    const citationStrictness = options?.citationStrictness ?? this.config.citationStrictness;
 
     let text = "";
     let chatTokenUsage: TokenUsage = { ...NO_TOKENS };
@@ -240,6 +345,8 @@ export class OpenRef {
         maxContinuationRequests: this.config.maxContinuationRequests,
         preferLatest: this.config.preferLatest,
         currentDateTime: dateCtx.dateLabel,
+        systemPrompt: options?.systemPrompt ?? this.config.systemPrompt,
+        citationStrictness,
         fallbackModels: this.config.fallbackChatModels,
         maxRetries: this.config.maxRetries,
         retryDelayMs: this.config.retryDelayMs,
@@ -250,6 +357,10 @@ export class OpenRef {
       } else if (event.type === "usage") {
         chatTokenUsage = event.data;
       }
+    }
+
+    if (!citationStrictness) {
+      text = stripInlineCitations(text);
     }
 
     return {

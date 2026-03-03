@@ -1,6 +1,45 @@
-export interface OpenRefConfig {
-  openRouterApiKey: string;
+export interface OpenRefLLMConfig {
+  apiKey?: string;
+  chatModel?: string;
+  fallbackChatModels?: string[];
+  maxRetries?: number;
+  retryDelayMs?: number;
+  maxOutputTokens?: number;
+  maxContinuationRequests?: number;
+  systemPrompt?: string;
+  citationStrictness?: boolean;
+}
+
+export interface OpenRefSearchConfig {
+  preferLatest?: boolean;
+  timeZone?: string;
+  maxSources?: number;
+  searchTimeout?: number;
+  enableReranking?: boolean;
+  rerankTimeout?: number;
+}
+
+export interface OpenRefRetrievalConfig {
+  contentTimeout?: number;
+  maxContextTokens?: number;
+  chunkTargetTokens?: number;
+}
+
+export interface OpenRefResponseConfig {
   stream?: boolean;
+}
+
+export interface OpenRefConfig {
+  llm?: OpenRefLLMConfig;
+  search?: OpenRefSearchConfig;
+  retrieval?: OpenRefRetrievalConfig;
+  response?: OpenRefResponseConfig;
+
+  // Legacy top-level fields (supported for backward compatibility)
+  openRouterApiKey?: string;
+  stream?: boolean;
+  systemPrompt?: string;
+  citationStrictness?: boolean;
   preferLatest?: boolean;
   timeZone?: string;
   chatModel?: string;
@@ -70,6 +109,8 @@ export interface CitationMap {
 
 export interface ChatOptions {
   stream?: boolean;
+  systemPrompt?: string;
+  citationStrictness?: boolean;
 }
 
 export interface ChatResponse {

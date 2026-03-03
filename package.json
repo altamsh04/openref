@@ -9,9 +9,18 @@
     "README.md"
   ],
   "scripts": {
+    "clean": "rm -rf dist",
     "build": "tsc",
+    "example:build": "tsc -p tsconfig.example.json",
+    "example:run": "npm run example:build && node dist-example/example/index.js",
+    "example:non-stream": "npm run example:build && node dist-example/example/non-stream.js",
+    "example:stream": "npm run example:build && node dist-example/example/stream.js",
     "dev": "tsc --watch",
-    "prepublishOnly": "rm -rf dist && npm run build"
+    "typecheck": "tsc --noEmit",
+    "test:smoke": "npm run build && node scripts/smoke.js",
+    "test:pack": "npm run build && ./scripts/test-pack.sh",
+    "check": "npm run typecheck && npm run test:smoke && npm run test:pack",
+    "prepublishOnly": "npm run clean && npm run check"
   },
   "keywords": [
     "search",
