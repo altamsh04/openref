@@ -13,6 +13,7 @@ async function main(): Promise<void> {
       systemPrompt: "Be Content in proper markdown format.",
     },
     search: {
+      engineProvider: { provider: "brave" },
       preferLatest: false,
       maxSources: 3,
       enableReranking: true,

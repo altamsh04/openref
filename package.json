@@ -1,12 +1,13 @@
 {
   "name": "@altamsh04/openref",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Agentic web sources search SDK — turns natural language queries into ranked sources",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "CHANGELOG.md"
   ],
   "scripts": {
     "clean": "rm -rf dist",

@@ -10,6 +10,13 @@ export interface OpenRefLLMConfig {
   citationStrictness?: boolean;
 }
 
+export type SearchProvider = "brave" | "duckduckgo" | "bing" | "searxng" | "searxncg";
+
+export interface OpenRefEngineProviderConfig {
+  provider?: SearchProvider | SearchProvider[];
+  queryUrl?: string;
+}
+
 export interface OpenRefSearchConfig {
   preferLatest?: boolean;
   timeZone?: string;
@@ -17,6 +24,10 @@ export interface OpenRefSearchConfig {
   searchTimeout?: number;
   enableReranking?: boolean;
   rerankTimeout?: number;
+  queryExpansion?: boolean;
+  queryExpansionValue?: number;
+  queryExpansionTimeout?: number;
+  engineProvider?: OpenRefEngineProviderConfig;
 }
 
 export interface OpenRefRetrievalConfig {
@@ -42,6 +53,10 @@ export interface OpenRefConfig {
   citationStrictness?: boolean;
   preferLatest?: boolean;
   timeZone?: string;
+  queryExpansion?: boolean;
+  queryExpansionValue?: number;
+  queryExpansionTimeout?: number;
+  engineProvider?: OpenRefEngineProviderConfig;
   chatModel?: string;
   fallbackChatModels?: string[];
   maxRetries?: number;
@@ -82,6 +97,9 @@ export interface SearchMetadata {
   latencyMs: number;
   queriesExecuted: number;
   totalResults: number;
+  expandedQueries?: string[];
+  primaryProviderUsed?: SearchProvider;
+  providersUsed?: SearchProvider[];
   tokenUsage: TokenUsage;
 }
 
@@ -90,6 +108,7 @@ export interface RawSearchHit {
   title: string;
   snippet?: string;
   querySource?: string;
+  provider?: SearchProvider;
 }
 
 export interface Chunk {
@@ -123,6 +142,7 @@ export interface ChatResponse {
 }
 
 export type ChatEvent =
+  | { type: "expanded_queries"; data: string[] }
   | { type: "sources"; data: SearchResult }
   | { type: "text"; data: string }
   | { type: "citations"; data: CitationMap }

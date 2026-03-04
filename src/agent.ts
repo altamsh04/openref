@@ -6,11 +6,14 @@ import type {
   ChatResponse,
   ChatEvent,
   RawSearchHit,
+  Source,
+  SearchProvider,
 } from "./types";
-import { searchWeb } from "./search";
+import { ALL_SEARCH_PROVIDERS, searchAll, searchWeb } from "./search";
 import { fastFilter, llmRerank } from "./ranker";
 import { fetchAndChunk } from "./markdown";
 import { streamChat, buildCitationMap } from "./chat";
+import { expandQuery } from "./queryexpander";
 
 const DEFAULTS = {
   stream: true,
@@ -29,6 +32,11 @@ const DEFAULTS = {
   contentTimeout: 6000,
   enableReranking: true,
   rerankTimeout: 4000,
+  queryExpansion: false,
+  queryExpansionValue: 3,
+  queryExpansionTimeout: 1200,
+  searchProvider: "brave" as SearchProvider,
+  searchProviderQueryUrl: "",
   maxContextTokens: 6000,
   chunkTargetTokens: 400,
 } as const;
@@ -53,6 +61,11 @@ interface ResolvedOpenRefConfig {
   contentTimeout: number;
   enableReranking: boolean;
   rerankTimeout: number;
+  queryExpansion: boolean;
+  queryExpansionValue: number;
+  queryExpansionTimeout: number;
+  searchProviders: SearchProvider[];
+  searchProviderQueryUrl: string;
   maxContextTokens: number;
   chunkTargetTokens: number;
 }
@@ -62,6 +75,27 @@ function pickDefined<T>(...values: Array<T | undefined>): T | undefined {
     if (value !== undefined) return value;
   }
   return undefined;
+}
+
+function resolveSearchProviders(
+  providerInput: SearchProvider | SearchProvider[] | undefined,
+  defaultPrimary: SearchProvider
+): SearchProvider[] {
+  const fallbackProviders: SearchProvider[] = ["brave", "duckduckgo", "bing"];
+  const preferred = Array.isArray(providerInput) ? providerInput : [providerInput ?? defaultPrimary];
+  const ordered: SearchProvider[] = [];
+
+  for (const provider of preferred) {
+    if (ALL_SEARCH_PROVIDERS.includes(provider) && !ordered.includes(provider)) {
+      ordered.push(provider);
+    }
+  }
+
+  for (const provider of fallbackProviders) {
+    if (!ordered.includes(provider)) ordered.push(provider);
+  }
+
+  return ordered;
 }
 
 function assertValidQuery(query: string): void {
@@ -109,6 +143,34 @@ function stripInlineCitations(text: string): string {
     .trim();
 }
 
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, fallback: T): Promise<T> {
+  if (timeoutMs <= 0) return promise;
+  return new Promise((resolve) => {
+    let done = false;
+    const timer = setTimeout(() => {
+      if (!done) {
+        done = true;
+        resolve(fallback);
+      }
+    }, timeoutMs);
+    promise
+      .then((value) => {
+        if (!done) {
+          done = true;
+          clearTimeout(timer);
+          resolve(value);
+        }
+      })
+      .catch(() => {
+        if (!done) {
+          done = true;
+          clearTimeout(timer);
+          resolve(fallback);
+        }
+      });
+  });
+}
+
 export class OpenRef {
   private config: ResolvedOpenRefConfig;
 
@@ -152,6 +214,28 @@ export class OpenRef {
         DEFAULTS.enableReranking
       )!,
       rerankTimeout: pickDefined(config.search?.rerankTimeout, config.rerankTimeout, DEFAULTS.rerankTimeout)!,
+      queryExpansion: pickDefined(config.search?.queryExpansion, config.queryExpansion, DEFAULTS.queryExpansion)!,
+      queryExpansionValue: Math.max(
+        0,
+        Math.min(
+          5,
+          pickDefined(config.search?.queryExpansionValue, config.queryExpansionValue, DEFAULTS.queryExpansionValue)!
+        )
+      ),
+      queryExpansionTimeout: pickDefined(
+        config.search?.queryExpansionTimeout,
+        config.queryExpansionTimeout,
+        DEFAULTS.queryExpansionTimeout
+      )!,
+      searchProviders: resolveSearchProviders(
+        pickDefined(config.search?.engineProvider?.provider, config.engineProvider?.provider),
+        DEFAULTS.searchProvider
+      ),
+      searchProviderQueryUrl: (pickDefined(
+        config.search?.engineProvider?.queryUrl,
+        config.engineProvider?.queryUrl,
+        DEFAULTS.searchProviderQueryUrl
+      ) ?? "").trim(),
       maxContextTokens: pickDefined(
         config.retrieval?.maxContextTokens,
         config.maxContextTokens,
@@ -165,14 +249,87 @@ export class OpenRef {
     };
   }
 
-  async search(query: string): Promise<SearchResult> {
-    assertValidQuery(query);
-
-    const start = performance.now();
+  private async executeSearch(
+    query: string,
+    dateCtx: { year: string; monthYear: string; dateLabel: string }
+  ): Promise<{
+    sources: Source[];
+    expandedQueries: string[];
+    queriesExecuted: number;
+    primaryProviderUsed?: SearchProvider;
+    providersUsed: SearchProvider[];
+  }> {
     const timeout = this.config.searchTimeout;
-    const dateCtx = getDateContext(this.config.timeZone);
     const queryForSearch = this.config.preferLatest ? buildLatestAwareQuery(query, dateCtx) : query;
-    const allHits: RawSearchHit[] = await searchWeb(queryForSearch, timeout);
+
+    const initialSearchPromise = searchWeb(
+      queryForSearch,
+      timeout,
+      this.config.searchProviders,
+      this.config.searchProviderQueryUrl
+    );
+    const expansionPromise = this.config.queryExpansion
+      ? expandQuery(
+          query,
+          this.config.openRouterApiKey,
+          this.config.chatModel,
+          this.config.queryExpansionValue,
+          this.config.queryExpansionTimeout,
+          this.config.preferLatest,
+          dateCtx.dateLabel
+        )
+      : Promise.resolve([] as string[]);
+
+    const expandedQueriesPromise = withTimeout(expansionPromise, this.config.queryExpansionTimeout, [] as string[]);
+    const expandedSearchPromise = expandedQueriesPromise.then(async (expandedQueries) => {
+      if (expandedQueries.length === 0) {
+        return {
+          expandedQueries,
+          expandedSearchQueries: [] as string[],
+          expandedHits: [] as RawSearchHit[],
+        };
+      }
+
+      const expandedSearchQueries = expandedQueries.map((q) =>
+        this.config.preferLatest ? buildLatestAwareQuery(q, dateCtx) : q
+      );
+      const expandedHits = await searchAll(
+        expandedSearchQueries,
+        timeout,
+        this.config.searchProviders,
+        this.config.searchProviderQueryUrl
+      );
+      return { expandedQueries, expandedSearchQueries, expandedHits };
+    });
+
+    const [initialHits, expandedSearchResult] = await Promise.all([
+      initialSearchPromise,
+      expandedSearchPromise,
+    ]);
+    const { expandedQueries, expandedSearchQueries, expandedHits } = expandedSearchResult;
+
+    let allHits: RawSearchHit[] = [...initialHits, ...expandedHits];
+
+    // Resilience fallback: if date-biased or timed requests returned nothing,
+    // retry once with plain queries and a slightly longer timeout.
+    if (allHits.length === 0) {
+      const retryTimeout = Math.max(timeout, 8000);
+      const retryInitial = await searchWeb(
+        query,
+        retryTimeout,
+        this.config.searchProviders,
+        this.config.searchProviderQueryUrl
+      );
+      const retryExpanded = expandedQueries.length > 0
+        ? await searchAll(
+            expandedQueries,
+            retryTimeout,
+            this.config.searchProviders,
+            this.config.searchProviderQueryUrl
+          )
+        : [];
+      allHits = [...retryInitial, ...retryExpanded];
+    }
 
     const candidates = fastFilter(allHits, 30);
 
@@ -198,13 +355,43 @@ export class OpenRef {
           )
         : candidates.slice(0, this.config.maxSources);
 
+    const providersUsed: SearchProvider[] = [];
+    for (const hit of allHits) {
+      const provider = hit.provider;
+      if (!provider) continue;
+      if (!providersUsed.includes(provider)) providersUsed.push(provider);
+    }
+    const primaryProviderUsed = providersUsed[0];
+
+    return {
+      sources,
+      expandedQueries,
+      queriesExecuted: 1 + expandedSearchQueries.length,
+      primaryProviderUsed,
+      providersUsed,
+    };
+  }
+
+  async search(query: string): Promise<SearchResult> {
+    assertValidQuery(query);
+
+    const start = performance.now();
+    const dateCtx = getDateContext(this.config.timeZone);
+    const { sources, expandedQueries, queriesExecuted, primaryProviderUsed, providersUsed } = await this.executeSearch(
+      query,
+      dateCtx
+    );
+
     return {
       query,
       sources,
       metadata: {
         latencyMs: Math.round(performance.now() - start),
-        queriesExecuted: 1,
+        queriesExecuted,
         totalResults: sources.length,
+        expandedQueries,
+        primaryProviderUsed,
+        providersUsed,
         tokenUsage: NO_TOKENS,
       },
     };
@@ -223,6 +410,9 @@ export class OpenRef {
     const dateCtx = getDateContext(this.config.timeZone);
 
     const result = await this.search(query);
+    if (result.metadata.expandedQueries && result.metadata.expandedQueries.length > 0) {
+      yield { type: "expanded_queries", data: result.metadata.expandedQueries };
+    }
     yield { type: "sources", data: result };
 
     if (result.sources.length === 0) {

@@ -13,6 +13,7 @@ Query -> Web Search -> Content Extraction/Chunking -> Streaming Chat Response
 - Web search with provider fallback (`Brave` -> `DuckDuckGo`)
 - Source deduplication and domain diversity filtering
 - Optional LLM reranking of search candidates
+- Optional LLM query expansion for broader retrieval
 - Query-aware page extraction and chunk scoring
 - Streaming chat response
 - Configurable citation behavior (`citationStrictness`)
@@ -45,9 +46,13 @@ const agent = new OpenRef({
     maxContinuationRequests: 2
   },
   search: {
+    engineProvider: { provider: "brave" }, // fallback order: duckduckgo -> bing
     preferLatest: true,
     timeZone: "America/New_York",
     maxSources: 5,
+    queryExpansion: true,
+    queryExpansionValue: 3,
+    queryExpansionTimeout: 1200,
     searchTimeout: 5000,
     enableReranking: true,
     rerankTimeout: 4000
@@ -122,6 +127,12 @@ Files:
 - `preferLatest?: boolean` Adds recency bias to search and prompting.
 - `timeZone?: string` Used for date context formatting.
 - `maxSources?: number` Final number of sources to keep.
+- `queryExpansion?: boolean` Expand user query into subqueries using LLM before retrieval.
+- `queryExpansionValue?: number` Number of expanded subqueries (0-5).
+- `queryExpansionTimeout?: number` Max expansion wait time in ms.
+- `engineProvider?: { provider?: "brave" | "duckduckgo" | "bing" | "searxng" | "searxncg" | Array<...>, queryUrl?: string }`
+  Choose preferred engine order. If one provider is given (e.g. `"brave"`), OpenRef auto-falls back to the other mainstream engines.
+  For `provider: "searxng"`, you can pass a custom `queryUrl` (for example `http://localhost:8080/search?q={query}`).
 - `searchTimeout?: number` Search request timeout in ms.
 - `enableReranking?: boolean` Enable LLM reranking for candidates.
 - `rerankTimeout?: number` Reranking timeout in ms.
@@ -146,6 +157,7 @@ Per-request options:
 - `citationStrictness?: boolean` Overrides constructor `llm.citationStrictness`.
 
 When `stream: true`, returns `AsyncGenerator<ChatEvent>` with:
+- `expanded_queries` (optional, early event when enabled)
 - `sources`
 - `text` (multiple chunks)
 - `citations`
@@ -157,6 +169,8 @@ When `stream: false`, returns `Promise<ChatResponse>` with:
 - `citationMap`
 - `chatTokenUsage`
 - `metadata`
+
+`search()` and `chat(..., { stream: false })` include `metadata.expandedQueries` when query expansion is enabled.
 
 ## Legacy Config Support
 
